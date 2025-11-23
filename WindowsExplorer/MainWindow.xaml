@@ -30,7 +30,7 @@
         </Grid.RowDefinitions>
 
         <!-- Title Bar with Tabs -->
-        <Grid Grid.Row="0" x:Name="TitleBarGrid" Background="Transparent" Height="32">
+        <Grid Grid.Row="0" x:Name="TitleBarGrid" Background="Transparent" MinHeight="40" Padding="0,0,0,6">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
@@ -52,11 +52,106 @@
                     AddTabButtonClick="TabView_AddTabButtonClick"
                     SelectionChanged="TabView_SelectionChanged"
                     Margin="0,0,0,0"
-                    VerticalAlignment="Stretch"
-                    VerticalContentAlignment="Stretch"
+                    VerticalAlignment="Center"
+                    VerticalContentAlignment="Center"
                     Background="Transparent"
                     BorderThickness="0"
-                    IsAddTabButtonVisible="True">
+                    IsAddTabButtonVisible="True"
+                    TabWidthMode="SizeToContent">
+                <TabView.Resources>
+                    <!-- Style for AddTabButton to match tab height -->
+                    <Style TargetType="Button" x:Key="AddTabButtonStyle">
+                        <Setter Property="MinHeight" Value="32"/>
+                        <Setter Property="Height" Value="32"/>
+                        <Setter Property="Padding" Value="12,0"/>
+                        <Setter Property="VerticalAlignment" Value="Center"/>
+                        <Setter Property="Margin" Value="4,0,0,0"/>
+                    </Style>
+                    <!-- Style for TabViewItem to add bottom padding to header content and show selected state -->
+                    <Style TargetType="TabViewItem">
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="TabViewItem">
+                                    <Border x:Name="RootGrid" Padding="0,0,0,4" CornerRadius="6,6,0,0" MinHeight="32" VerticalAlignment="Center" Background="Transparent">
+                                        <Grid VerticalAlignment="Center">
+                                            <VisualStateManager.VisualStateGroups>
+                                                <VisualStateGroup x:Name="CommonStates">
+                                                    <VisualState x:Name="Normal">
+                                                        <Storyboard>
+                                                            <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RootGrid" Storyboard.TargetProperty="Background">
+                                                                <DiscreteObjectKeyFrame KeyTime="0" Value="Transparent"/>
+                                                            </ObjectAnimationUsingKeyFrames>
+                                                            <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Foreground">
+                                                                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SystemControlForegroundBaseMediumBrush}"/>
+                                                            </ObjectAnimationUsingKeyFrames>
+                                                        </Storyboard>
+                                                    </VisualState>
+                                                    <VisualState x:Name="PointerOver">
+                                                        <Storyboard>
+                                                            <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RootGrid" Storyboard.TargetProperty="Background">
+                                                                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SystemControlBackgroundBaseLowBrush}"/>
+                                                            </ObjectAnimationUsingKeyFrames>
+                                                            <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Foreground">
+                                                                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SystemControlForegroundBaseHighBrush}"/>
+                                                            </ObjectAnimationUsingKeyFrames>
+                                                        </Storyboard>
+                                                    </VisualState>
+                                                <VisualState x:Name="Selected">
+                                                    <Storyboard>
+                                                        <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RootGrid" Storyboard.TargetProperty="Background">
+                                                            <DiscreteObjectKeyFrame KeyTime="0">
+                                                                <DiscreteObjectKeyFrame.Value>
+                                                                    <StaticResource ResourceKey="SelectedTabBackground"/>
+                                                                </DiscreteObjectKeyFrame.Value>
+                                                            </DiscreteObjectKeyFrame>
+                                                        </ObjectAnimationUsingKeyFrames>
+                                                        <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Foreground">
+                                                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SystemControlForegroundBaseHighBrush}"/>
+                                                        </ObjectAnimationUsingKeyFrames>
+                                                    </Storyboard>
+                                                </VisualState>
+                                                <VisualState x:Name="SelectedPointerOver">
+                                                    <Storyboard>
+                                                        <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RootGrid" Storyboard.TargetProperty="Background">
+                                                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SystemControlBackgroundAltMediumBrush}"/>
+                                                        </ObjectAnimationUsingKeyFrames>
+                                                        <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Foreground">
+                                                            <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SystemControlForegroundBaseHighBrush}"/>
+                                                        </ObjectAnimationUsingKeyFrames>
+                                                    </Storyboard>
+                                                </VisualState>
+                                                </VisualStateGroup>
+                                            </VisualStateManager.VisualStateGroups>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <ContentPresenter x:Name="ContentPresenter"
+                                                            Content="{TemplateBinding Header}"
+                                                            Margin="12,0,12,0"
+                                                            VerticalAlignment="Center"
+                                                            HorizontalAlignment="Left"/>
+                                            <Button x:Name="CloseButton"
+                                                  Grid.Column="1"
+                                                  Content="&#xE8BB;"
+                                                  FontFamily="Segoe MDL2 Assets"
+                                                  FontSize="12"
+                                                  Width="20"
+                                                  Height="20"
+                                                  Padding="0"
+                                                  Margin="8,0,8,0"
+                                                  VerticalAlignment="Center"
+                                                  HorizontalAlignment="Center"
+                                                  Background="Transparent"
+                                                  BorderThickness="0"
+                                                  Visibility="{Binding IsClosable, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                        </Grid>
+                                    </Border>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </TabView.Resources>
             </TabView>
             
             <!-- Window Controls (handled by system, but we need space) -->
@@ -99,6 +194,7 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="250"/>
+                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0" 
                               Text="Search:" 
@@ -107,7 +203,14 @@
                     <TextBox x:Name="SearchTextBox"
                             Grid.Column="1"
                             PlaceholderText="Filter by name..."
-                            TextChanged="SearchTextBox_TextChanged"/>
+                            TextChanged="SearchTextBox_TextChanged"
+                            Margin="0,0,8,0"/>
+                    <Button x:Name="StopSearchButton"
+                            Grid.Column="2"
+                            Content="Stop"
+                            Click="StopSearchButton_Click"
+                            Padding="12,6"
+                            Visibility="{Binding SelectedTab.ExplorerViewModel.IsSearching, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                 </Grid>
                 <TextBlock Grid.Row="1"
                           Text="{Binding SelectedTab.ExplorerViewModel.SearchStatusText}"

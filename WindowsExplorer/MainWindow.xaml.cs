@@ -163,7 +163,12 @@ namespace WindowsExplorer
             {
                 Header = tabViewModel.Title,
                 Content = null, // Content is handled by the main content area
-                Tag = tabViewModel // Store the ViewModel in Tag for easy access
+                Tag = tabViewModel, // Store the ViewModel in Tag for easy access
+                MinHeight = 32,
+                Height = 32,
+                Padding = new Microsoft.UI.Xaml.Thickness(0),
+                Margin = new Microsoft.UI.Xaml.Thickness(0, 0, 2, 0),
+                VerticalAlignment = Microsoft.UI.Xaml.VerticalAlignment.Center
             };
             
             // Update title when it changes
@@ -312,6 +317,14 @@ namespace WindowsExplorer
                 {
                     _currentViewModel.SearchText = currentText;
                 }
+            }
+        }
+
+        private void StopSearchButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentViewModel != null)
+            {
+                _currentViewModel.CancelSearch();
             }
         }
 

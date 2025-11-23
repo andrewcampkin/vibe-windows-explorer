@@ -32,6 +32,7 @@ namespace WindowsExplorer.ViewModels
     public class FileExplorerViewModel : INotifyPropertyChanged
     {
         private readonly FileSystemService _fileSystemService;
+        private readonly SearchService _searchService;
         private string _currentPath = string.Empty;
         private string _searchText = string.Empty;
         private SortColumn _sortColumn = SortColumn.Name;
@@ -40,7 +41,7 @@ namespace WindowsExplorer.ViewModels
         private readonly Stack<string> _forwardHistory = new();
         private readonly List<FileSystemItem> _allItems = new();
         private CancellationTokenSource? _searchCancellationTokenSource;
-        private bool _isSearchingRecursive = false;
+        private string? _activeSearchPath; // Track which path the active search is for
         private bool _isSearching = false;
         private int _foldersChecked = 0;
         private int _filesChecked = 0;
@@ -50,6 +51,7 @@ namespace WindowsExplorer.ViewModels
         public FileExplorerViewModel()
         {
             _fileSystemService = new FileSystemService();
+            _searchService = new SearchService(_fileSystemService);
             Items = new ObservableCollection<FileSystemItem>();
             NavigateToPath(_fileSystemService.GetDefaultPath());
         }
@@ -138,6 +140,7 @@ namespace WindowsExplorer.ViewModels
                 // If search text is empty, clear immediately
                 if (string.IsNullOrWhiteSpace(_searchText))
                 {
+                    _activeSearchPath = null;
                     ApplySearchFilter();
                 }
                 else
@@ -463,7 +466,49 @@ namespace WindowsExplorer.ViewModels
                 CurrentSortDirection = SortDirection.Ascending;
             }
             
-            ApplySearchFilter();
+            // Sort existing items without re-running search
+            SortCurrentItems();
+        }
+
+        private void SortCurrentItems()
+        {
+            var dispatcherQueue = App.MainWindow?.DispatcherQueue;
+            if (dispatcherQueue == null)
+            {
+                return;
+            }
+
+            var currentItems = Items.ToList();
+            var sortedItems = _sortDirection == SortDirection.Ascending
+                ? SortItemsAscending(currentItems, _sortColumn)
+                : SortItemsDescending(currentItems, _sortColumn);
+
+            dispatcherQueue.TryEnqueue(() =>
+            {
+                Items.Clear();
+                foreach (var item in sortedItems)
+                {
+                    Items.Add(item);
+                }
+            });
+        }
+
+        /// <summary>
+        /// Cancels the current search operation. Can be called from UI.
+        /// </summary>
+        public void CancelSearch()
+        {
+            CancelAndDisposeSearch();
+            // Clear search status on UI thread
+            if (App.MainWindow != null)
+            {
+                App.MainWindow.DispatcherQueue.TryEnqueue(() =>
+                {
+                    IsSearching = false;
+                    FoldersChecked = 0;
+                    FilesChecked = 0;
+                });
+            }
         }
 
         private void CancelAndDisposeSearch()
@@ -494,36 +539,57 @@ namespace WindowsExplorer.ViewModels
                 }
                 _searchCancellationTokenSource = null;
             }
+            
+            // Clear active search path
+            _activeSearchPath = null;
         }
 
         private async Task ApplySearchFilterAsync()
         {
-            System.Diagnostics.Debug.WriteLine($"[Search] ApplySearchFilterAsync called. CurrentPath: '{CurrentPath}', SearchText: '{_searchText}'");
+            // Capture current path and search text at the start
+            var searchPath = CurrentPath;
+            var currentSearchText = _searchText;
             
             // Cancel any ongoing search
             CancelAndDisposeSearch();
+            
+            // Check if path is valid for search
+            if (string.IsNullOrEmpty(searchPath) || !Directory.Exists(searchPath))
+            {
+                // At PC root or invalid path - just filter current items
+                await FilterCurrentItemsAsync(currentSearchText);
+                return;
+            }
+            
+            if (string.IsNullOrWhiteSpace(currentSearchText))
+            {
+                // No search - show current directory items
+                await ShowCurrentDirectoryItemsAsync();
+                return;
+            }
+            
+            // Start new search
             _searchCancellationTokenSource = new CancellationTokenSource();
-            var cancellationToken = _searchCancellationTokenSource?.Token ?? CancellationToken.None;
-
-            // Capture the current search text to ensure we use the latest value
-            var currentSearchText = _searchText;
-            System.Diagnostics.Debug.WriteLine($"[Search] Using search text: '{currentSearchText}'");
-
+            var cancellationToken = _searchCancellationTokenSource.Token;
+            _activeSearchPath = searchPath; // Track which path this search is for
+            
             // Get DispatcherQueue - must be on UI thread for ObservableCollection operations
             var dispatcherQueue = App.MainWindow?.DispatcherQueue;
             if (dispatcherQueue == null)
             {
-                // Can't proceed without DispatcherQueue
                 return;
             }
 
-            // Clear items on UI thread
+            // Clear items and set searching state on UI thread
             var clearTcs = new TaskCompletionSource<bool>();
             if (!dispatcherQueue.TryEnqueue(() =>
             {
                 try
                 {
                     Items.Clear();
+                    IsSearching = true;
+                    FoldersChecked = 0;
+                    FilesChecked = 0;
                     clearTcs.SetResult(true);
                 }
                 catch (Exception ex)
@@ -532,101 +598,175 @@ namespace WindowsExplorer.ViewModels
                 }
             }))
             {
-                // Failed to enqueue, can't proceed
                 return;
             }
             await clearTcs.Task;
 
-            if (string.IsNullOrWhiteSpace(currentSearchText))
+            // Perform search using SearchService
+            try
             {
-                // No search - show current directory items
-                _isSearchingRecursive = false;
-                IsSearching = false;
-                
-                if (cancellationToken.IsCancellationRequested) return;
-                
-                var filteredItems = new List<FileSystemItem>();
-                filteredItems.AddRange(_allItems);
-
-                // Sort the filtered items
-                var sortedItems = _sortDirection == SortDirection.Ascending
-                    ? SortItemsAscending(filteredItems, _sortColumn)
-                    : SortItemsDescending(filteredItems, _sortColumn);
-
-                // Add sorted items to collection on UI thread
-                var addTcs = new TaskCompletionSource<bool>();
-                if (!dispatcherQueue.TryEnqueue(() =>
+                await PerformSearchAsync(searchPath, currentSearchText, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                // Search was cancelled, ignore
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Search error: {ex.Message}");
+            }
+            finally
+            {
+                // Only update IsSearching if this search is still active (path hasn't changed)
+                if (_activeSearchPath == searchPath && !cancellationToken.IsCancellationRequested)
                 {
-                    try
+                    dispatcherQueue.TryEnqueue(() =>
                     {
-                        foreach (var item in sortedItems)
-                        {
-                            if (cancellationToken.IsCancellationRequested) return;
-                            Items.Add(item);
-                        }
-                        addTcs.SetResult(true);
-                    }
-                    catch (Exception ex)
-                    {
-                        addTcs.SetException(ex);
-                    }
-                }))
-                {
-                    // Failed to enqueue
-                    return;
+                        IsSearching = false;
+                    });
                 }
-                await addTcs.Task;
+            }
+        }
+
+        private async Task PerformSearchAsync(string searchPath, string searchTerm, CancellationToken cancellationToken)
+        {
+            var dispatcherQueue = App.MainWindow?.DispatcherQueue;
+            if (dispatcherQueue == null)
+            {
+                return;
+            }
+
+            // Track items found for final sorting
+            var foundItems = new List<FileSystemItem>();
+
+            // Perform search on background thread with callback for immediate display
+            var searchResult = await Task.Run(async () =>
+            {
+                return await _searchService.SearchAsync(
+                    searchPath,
+                    searchTerm,
+                    (folders, files) =>
+                    {
+                        // Update progress on UI thread
+                        if (dispatcherQueue != null && _activeSearchPath == searchPath)
+                        {
+                            dispatcherQueue.TryEnqueue(() =>
+                            {
+                                if (_activeSearchPath == searchPath) // Double-check path hasn't changed
+                                {
+                                    FoldersChecked = folders;
+                                    FilesChecked = files;
+                                }
+                            });
+                        }
+                    },
+                    (item) =>
+                    {
+                        // Add item to UI immediately as it's found (for progressive display)
+                        if (dispatcherQueue != null && _activeSearchPath == searchPath && !cancellationToken.IsCancellationRequested)
+                        {
+                            foundItems.Add(item);
+                            
+                            // Add to UI immediately on UI thread
+                            dispatcherQueue.TryEnqueue(() =>
+                            {
+                                // Only add if this search is still active
+                                if (_activeSearchPath == searchPath && !cancellationToken.IsCancellationRequested)
+                                {
+                                    Items.Add(item);
+                                }
+                            });
+                        }
+                    },
+                    cancellationToken);
+            }, cancellationToken);
+
+            // Items are already added to UI via callback as they're found
+            // No need to re-sort - items appear in breadth-first order
+            // User can sort by clicking column headers if desired
+        }
+
+        private async Task FilterCurrentItemsAsync(string searchText)
+        {
+            var dispatcherQueue = App.MainWindow?.DispatcherQueue;
+            if (dispatcherQueue == null)
+            {
+                return;
+            }
+
+            var filteredItems = new List<FileSystemItem>();
+            
+            if (string.IsNullOrWhiteSpace(searchText))
+            {
+                filteredItems.AddRange(_allItems);
             }
             else
             {
-                // Check if we should do recursive search
-                // Only do recursive if we're in a directory (not at PC root)
-                if (!string.IsNullOrEmpty(CurrentPath) && Directory.Exists(CurrentPath))
-                {
-                    _isSearchingRecursive = true;
-                    await SearchRecursiveAsync(CurrentPath, currentSearchText, cancellationToken);
-                }
-                else
-                {
-                    // At PC root or invalid path - just filter current items
-                    _isSearchingRecursive = false;
-                    IsSearching = false; // Not searching recursively
-                    
-                    if (cancellationToken.IsCancellationRequested) return;
-                    
-                    var searchLower = currentSearchText.ToLowerInvariant();
-                    var filteredItems = _allItems.Where(item => 
-                        item.Name.ToLowerInvariant().Contains(searchLower)).ToList();
-
-                    var sortedItems = _sortDirection == SortDirection.Ascending
-                        ? SortItemsAscending(filteredItems, _sortColumn)
-                        : SortItemsDescending(filteredItems, _sortColumn);
-
-                    // Add items on UI thread
-                    var addTcs2 = new TaskCompletionSource<bool>();
-                    if (!dispatcherQueue.TryEnqueue(() =>
-                    {
-                        try
-                        {
-                            foreach (var item in sortedItems)
-                            {
-                                if (cancellationToken.IsCancellationRequested) return;
-                                Items.Add(item);
-                            }
-                            addTcs2.SetResult(true);
-                        }
-                        catch (Exception ex)
-                        {
-                            addTcs2.SetException(ex);
-                        }
-                    }))
-                    {
-                        // Failed to enqueue
-                        return;
-                    }
-                    await addTcs2.Task;
-                }
+                var searchLower = searchText.ToLowerInvariant();
+                filteredItems = _allItems.Where(item => 
+                    item.Name.ToLowerInvariant().Contains(searchLower)).ToList();
             }
+
+            var sortedItems = _sortDirection == SortDirection.Ascending
+                ? SortItemsAscending(filteredItems, _sortColumn)
+                : SortItemsDescending(filteredItems, _sortColumn);
+
+            var addTcs = new TaskCompletionSource<bool>();
+            if (!dispatcherQueue.TryEnqueue(() =>
+            {
+                try
+                {
+                    Items.Clear();
+                    foreach (var item in sortedItems)
+                    {
+                        Items.Add(item);
+                    }
+                    addTcs.SetResult(true);
+                }
+                catch (Exception ex)
+                {
+                    addTcs.SetException(ex);
+                }
+            }))
+            {
+                return;
+            }
+            await addTcs.Task;
+        }
+
+        private async Task ShowCurrentDirectoryItemsAsync()
+        {
+            var dispatcherQueue = App.MainWindow?.DispatcherQueue;
+            if (dispatcherQueue == null)
+            {
+                return;
+            }
+
+            var sortedItems = _sortDirection == SortDirection.Ascending
+                ? SortItemsAscending(_allItems, _sortColumn)
+                : SortItemsDescending(_allItems, _sortColumn);
+
+            var addTcs = new TaskCompletionSource<bool>();
+            if (!dispatcherQueue.TryEnqueue(() =>
+            {
+                try
+                {
+                    Items.Clear();
+                    foreach (var item in sortedItems)
+                    {
+                        Items.Add(item);
+                    }
+                    addTcs.SetResult(true);
+                }
+                catch (Exception ex)
+                {
+                    addTcs.SetException(ex);
+                }
+            }))
+            {
+                return;
+            }
+            await addTcs.Task;
         }
 
         private void ApplySearchFilter()
@@ -635,167 +775,6 @@ namespace WindowsExplorer.ViewModels
             _ = ApplySearchFilterAsync();
         }
 
-        private async Task SearchRecursiveAsync(string rootPath, string searchTerm, CancellationToken cancellationToken)
-        {
-            // Get DispatcherQueue for UI thread operations
-            var dispatcherQueue = App.MainWindow?.DispatcherQueue;
-            if (dispatcherQueue == null)
-            {
-                return;
-            }
-
-            // Clear items on UI thread
-            var clearTcs = new TaskCompletionSource<bool>();
-            if (!dispatcherQueue.TryEnqueue(() =>
-            {
-                try
-                {
-                    Items.Clear();
-                    clearTcs.SetResult(true);
-                }
-                catch (Exception ex)
-                {
-                    clearTcs.SetException(ex);
-                }
-            }))
-            {
-                return;
-            }
-            await clearTcs.Task;
-            
-            // Reset search status on UI thread
-            var statusTcs = new TaskCompletionSource<bool>();
-            if (!dispatcherQueue.TryEnqueue(() =>
-            {
-                try
-                {
-                    IsSearching = true;
-                    FoldersChecked = 0;
-                    FilesChecked = 0;
-                    statusTcs.SetResult(true);
-                }
-                catch (Exception ex)
-                {
-                    statusTcs.SetException(ex);
-                }
-            }))
-            {
-                return;
-            }
-            await statusTcs.Task;
-            
-            var foundItems = new List<FileSystemItem>();
-
-            try
-            {
-                // Use lazy enumeration - only enumerate items as needed (memory efficient)
-                // Collect results on background thread
-                System.Diagnostics.Debug.WriteLine($"[Search] SearchRecursiveAsync starting for path: '{rootPath}', term: '{searchTerm}'");
-                await Task.Run(() =>
-                {
-                    int itemsFound = 0;
-                    foreach (var item in _fileSystemService.SearchRecursive(rootPath, searchTerm, 
-                        (folders, files) =>
-                        {
-                            // Update progress on UI thread
-                            if (App.MainWindow != null)
-                            {
-                                _ = App.MainWindow.DispatcherQueue.TryEnqueue(() =>
-                                {
-                                    FoldersChecked = folders;
-                                    FilesChecked = files;
-                                });
-                            }
-                        }))
-                    {
-                        if (cancellationToken.IsCancellationRequested)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"[Search] Search cancelled after finding {itemsFound} items");
-                            return;
-                        }
-
-                        foundItems.Add(item);
-                        itemsFound++;
-                        if (itemsFound <= 10) // Log first 10 items
-                        {
-                            System.Diagnostics.Debug.WriteLine($"[Search] Found item #{itemsFound}: {item.Name} at {item.Path}");
-                        }
-                    }
-                    System.Diagnostics.Debug.WriteLine($"[Search] Search enumeration completed. Found {itemsFound} items total");
-                }, cancellationToken);
-
-                // Update UI with all found items (still memory efficient - we only hold FileSystemItem references, not file contents)
-                if (!cancellationToken.IsCancellationRequested)
-                {
-                    System.Diagnostics.Debug.WriteLine($"[Search] Sorting {foundItems.Count} found items");
-                    // Sort the results
-                    var sorted = _sortDirection == SortDirection.Ascending
-                        ? SortItemsAscending(foundItems, _sortColumn)
-                        : SortItemsDescending(foundItems, _sortColumn);
-                    
-                    System.Diagnostics.Debug.WriteLine($"[Search] Adding {sorted.Count()} items to UI");
-                    // Add to UI collection on UI thread
-                    var addTcs = new TaskCompletionSource<bool>();
-                    if (!dispatcherQueue.TryEnqueue(() =>
-                    {
-                        try
-                        {
-                            int added = 0;
-                            foreach (var item in sorted)
-                            {
-                                if (cancellationToken.IsCancellationRequested) break;
-                                Items.Add(item);
-                                added++;
-                            }
-                            System.Diagnostics.Debug.WriteLine($"[Search] Added {added} items to UI collection");
-                            addTcs.SetResult(true);
-                        }
-                        catch (Exception ex)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"[Search] Error adding items to UI: {ex.GetType().Name} - {ex.Message}");
-                            addTcs.SetException(ex);
-                        }
-                    }))
-                    {
-                        System.Diagnostics.Debug.WriteLine($"[Search] Failed to enqueue UI update");
-                        return;
-                    }
-                    await addTcs.Task;
-                }
-                else
-                {
-                    System.Diagnostics.Debug.WriteLine($"[Search] Search was cancelled, not updating UI");
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Search was cancelled, ignore
-            }
-            catch (Exception ex)
-            {
-                // Log or handle other exceptions - don't silently fail
-                System.Diagnostics.Debug.WriteLine($"Search error: {ex.Message}");
-                System.Diagnostics.Debug.WriteLine($"Stack trace: {ex.StackTrace}");
-            }
-            finally
-            {
-                // Set IsSearching = false on UI thread (fire and forget in finally)
-                if (dispatcherQueue != null)
-                {
-                    dispatcherQueue.TryEnqueue(() =>
-                    {
-                        try
-                        {
-                            IsSearching = false;
-                        }
-                        catch
-                        {
-                            // Ignore exceptions in finally
-                        }
-                    });
-                }
-            }
-        }
 
         private IEnumerable<FileSystemItem> SortItemsAscending(List<FileSystemItem> items, SortColumn column)
         {

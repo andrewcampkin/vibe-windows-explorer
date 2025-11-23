@@ -1,11 +1,5 @@
 {
   "profiles": {
-    "WindowsExplorer (Package)": {
-      "commandName": "MsixPackage"
-    },
-    "WindowsExplorer (Unpackaged)": {
-      "commandName": "Project"
-    },
     "WindowsExplorer": {
       "commandName": "Project",
       "nativeDebugging": false

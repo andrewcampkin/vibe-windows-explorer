@@ -1,7 +1,7 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+
 using WindowsExplorer.Models;
 
 namespace WindowsExplorer.Services

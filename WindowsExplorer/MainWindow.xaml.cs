@@ -5,7 +5,6 @@ using Windows.System;
 using Windows.Graphics;
 using Microsoft.UI.Windowing;
 using Windows.ApplicationModel;
-using System;
 using System.Collections.Specialized;
 using System.Linq;
 using System.Diagnostics;
@@ -324,7 +323,7 @@ namespace WindowsExplorer
         {
             if (_currentViewModel != null)
             {
-                _currentViewModel.CancelSearch();
+                _currentViewModel.CancelOrContinueSearch();
             }
         }
 

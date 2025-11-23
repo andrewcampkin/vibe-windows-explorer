@@ -1,9 +1,8 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+
 using WindowsExplorer.Models;
 
 namespace WindowsExplorer.Services
@@ -29,7 +28,10 @@ namespace WindowsExplorer.Services
             string searchTerm,
             Action<int, int>? progressCallback,
             Action<FileSystemItem>? itemFoundCallback,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            int maxResults = int.MaxValue,
+            Queue<string>? continuationQueue = null,
+            HashSet<string>? continuationProcessedDirs = null)
         {
             if (string.IsNullOrWhiteSpace(searchTerm))
             {
@@ -45,15 +47,18 @@ namespace WindowsExplorer.Services
             var searchLower = searchTerm.ToLowerInvariant();
             
             // Use Queue for breadth-first search (top-level items appear first)
-            var searchQueue = new Queue<string>();
-            searchQueue.Enqueue(rootPath);
+            var searchQueue = continuationQueue ?? new Queue<string>();
+            if (continuationQueue == null)
+            {
+                searchQueue.Enqueue(rootPath);
+            }
 
             int foldersChecked = 0;
             int filesChecked = 0;
             var items = new List<FileSystemItem>();
 
             // Track which directories we've already processed to avoid duplicates
-            var processedDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var processedDirectories = continuationProcessedDirs ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             while (searchQueue.Count > 0 && !cancellationToken.IsCancellationRequested)
             {
@@ -94,8 +99,18 @@ namespace WindowsExplorer.Services
                         searchLower,
                         items,
                         itemFoundCallback,
-                        cancellationToken);
+                        cancellationToken,
+                        maxResults - items.Count);
                     filesChecked += filesInDir;
+
+                    // Check if we've hit the result limit
+                    if (items.Count >= maxResults)
+                    {
+                        result.IsPaused = true;
+                        result.RemainingQueue = searchQueue;
+                        result.ProcessedDirectories = processedDirectories;
+                        break;
+                    }
 
                     // Process directories in current directory
                     var subdirectories = await ProcessDirectoriesInDirectoryAsync(
@@ -105,7 +120,17 @@ namespace WindowsExplorer.Services
                         items,
                         itemFoundCallback,
                         searchQueue,
-                        cancellationToken);
+                        cancellationToken,
+                        maxResults - items.Count);
+
+                    // Check again after processing directories
+                    if (items.Count >= maxResults)
+                    {
+                        result.IsPaused = true;
+                        result.RemainingQueue = searchQueue;
+                        result.ProcessedDirectories = processedDirectories;
+                        break;
+                    }
 
                     // Update progress periodically
                     if (progressCallback != null && (foldersChecked % 10 == 0 || filesChecked % 100 == 0))
@@ -148,7 +173,8 @@ namespace WindowsExplorer.Services
             string searchLower,
             List<FileSystemItem> items,
             Action<FileSystemItem>? itemFoundCallback,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            int remainingSlots = int.MaxValue)
         {
             int filesChecked = 0;
             
@@ -158,7 +184,7 @@ namespace WindowsExplorer.Services
                 {
                     foreach (var filePath in Directory.EnumerateFiles(directoryPath))
                     {
-                        if (cancellationToken.IsCancellationRequested)
+                        if (cancellationToken.IsCancellationRequested || remainingSlots <= 0)
                         {
                             break;
                         }
@@ -191,6 +217,7 @@ namespace WindowsExplorer.Services
 
                                 // Notify callback immediately for progressive display
                                 itemFoundCallback?.Invoke(item);
+                                remainingSlots--;
                             }
                         }
                         catch (UnauthorizedAccessException)
@@ -230,7 +257,8 @@ namespace WindowsExplorer.Services
             List<FileSystemItem> items,
             Action<FileSystemItem>? itemFoundCallback,
             Queue<string> searchQueue,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            int remainingSlots = int.MaxValue)
         {
             var subdirectories = new List<string>();
 
@@ -332,6 +360,9 @@ namespace WindowsExplorer.Services
         public List<FileSystemItem> Items { get; set; } = new();
         public int FoldersChecked { get; set; }
         public int FilesChecked { get; set; }
+        public bool IsPaused { get; set; }
+        public Queue<string>? RemainingQueue { get; set; }
+        public HashSet<string>? ProcessedDirectories { get; set; }
     }
 }
 

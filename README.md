@@ -102,4 +102,3 @@ WindowsExplorer/
 - Drag and drop
 - File properties dialog
 - Thumbnail view for images
-

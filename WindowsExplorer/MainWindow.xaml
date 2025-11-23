@@ -207,7 +207,7 @@
                             Margin="0,0,8,0"/>
                     <Button x:Name="StopSearchButton"
                             Grid.Column="2"
-                            Content="Stop"
+                            Content="{Binding SelectedTab.ExplorerViewModel.StopSearchButtonText}"
                             Click="StopSearchButton_Click"
                             Padding="12,6"
                             Visibility="{Binding SelectedTab.ExplorerViewModel.IsSearching, Converter={StaticResource BooleanToVisibilityConverter}}"/>
@@ -217,7 +217,8 @@
                           FontSize="11"
                           Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}"
                           Margin="0,4,0,0"
-                          Visibility="{Binding SelectedTab.ExplorerViewModel.IsSearching, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                          Visibility="{Binding SelectedTab.ExplorerViewModel.IsSearching, Converter={StaticResource BooleanToVisibilityConverter}}"
+                          TextWrapping="Wrap"/>
             </Grid>
         </Grid>
 

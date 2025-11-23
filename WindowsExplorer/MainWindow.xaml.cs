@@ -324,7 +324,7 @@ namespace WindowsExplorer
         {
             if (_currentViewModel != null)
             {
-                _currentViewModel.CancelSearch();
+                _currentViewModel.CancelOrContinueSearch();
             }
         }
 

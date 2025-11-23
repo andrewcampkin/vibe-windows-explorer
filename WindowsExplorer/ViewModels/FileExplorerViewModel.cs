@@ -43,10 +43,14 @@ namespace WindowsExplorer.ViewModels
         private CancellationTokenSource? _searchCancellationTokenSource;
         private string? _activeSearchPath; // Track which path the active search is for
         private bool _isSearching = false;
+        private bool _isSearchPaused = false;
         private int _foldersChecked = 0;
         private int _filesChecked = 0;
         private Timer? _searchDebounceTimer;
         private const int SearchDebounceMilliseconds = 300;
+        private const int MaxSearchResults = 20;
+        private Queue<string>? _pausedSearchQueue;
+        private HashSet<string>? _pausedProcessedDirs;
 
         public FileExplorerViewModel()
         {
@@ -68,9 +72,33 @@ namespace WindowsExplorer.ViewModels
                     _isSearching = value;
                     OnPropertyChanged();
                     OnPropertyChanged(nameof(SearchStatusText));
+                    OnPropertyChanged(nameof(IsSearchPaused));
+                    OnPropertyChanged(nameof(StopSearchButtonText));
                 }
             }
         }
+
+        public bool IsSearchPaused
+        {
+            get => _isSearchPaused;
+            private set
+            {
+                if (_isSearchPaused != value)
+                {
+                    _isSearchPaused = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(StopSearchButtonText));
+                    OnPropertyChanged(nameof(SearchStatusText));
+                    // When paused, IsSearching should still be true to show the button
+                    if (value)
+                    {
+                        IsSearching = true;
+                    }
+                }
+            }
+        }
+
+        public string StopSearchButtonText => _isSearchPaused ? "Continue" : "Stop";
 
         public int FoldersChecked
         {
@@ -104,9 +132,13 @@ namespace WindowsExplorer.ViewModels
         {
             get
             {
-                if (!IsSearching)
+                if (!IsSearching && !IsSearchPaused)
                 {
                     return string.Empty;
+                }
+                if (IsSearchPaused)
+                {
+                    return $"Search paused at {Items.Count} results. Click Continue to find more.";
                 }
                 return $"Searching... ({FoldersChecked} folders, {FilesChecked} files checked)";
             }
@@ -252,6 +284,8 @@ namespace WindowsExplorer.ViewModels
                 CancelAndDisposeSearch();
                 // Clear search when navigating to a new path (without triggering search)
                 SetSearchText(string.Empty, triggerSearch: false);
+                // Clear search UI state
+                ClearSearchUIState();
                 RefreshItems();
                 OnPropertyChanged(nameof(CanGoBack));
                 OnPropertyChanged(nameof(CanGoForward));
@@ -293,6 +327,8 @@ namespace WindowsExplorer.ViewModels
                 CancelAndDisposeSearch();
                 // Clear search when navigating to a new path (without triggering search)
                 SetSearchText(string.Empty, triggerSearch: false);
+                // Clear search UI state
+                ClearSearchUIState();
                 RefreshItems();
                 OnPropertyChanged(nameof(CanGoBack));
                 OnPropertyChanged(nameof(CanGoForward));
@@ -494,6 +530,23 @@ namespace WindowsExplorer.ViewModels
         }
 
         /// <summary>
+        /// Cancels or continues the current search operation. Can be called from UI.
+        /// </summary>
+        public void CancelOrContinueSearch()
+        {
+            if (_isSearchPaused)
+            {
+                // Continue the paused search
+                ContinueSearch();
+            }
+            else
+            {
+                // Cancel the search
+                CancelSearch();
+            }
+        }
+
+        /// <summary>
         /// Cancels the current search operation. Can be called from UI.
         /// </summary>
         public void CancelSearch()
@@ -505,10 +558,51 @@ namespace WindowsExplorer.ViewModels
                 App.MainWindow.DispatcherQueue.TryEnqueue(() =>
                 {
                     IsSearching = false;
+                    IsSearchPaused = false;
                     FoldersChecked = 0;
                     FilesChecked = 0;
+                    _pausedSearchQueue = null;
+                    _pausedProcessedDirs = null;
                 });
             }
+        }
+
+        private void ContinueSearch()
+        {
+            if (!_isSearchPaused || _pausedSearchQueue == null || string.IsNullOrEmpty(_activeSearchPath))
+            {
+                return;
+            }
+
+            // Continue the search from where it paused
+            var searchPath = _activeSearchPath;
+            var currentSearchText = _searchText;
+            
+            // Create new cancellation token for continuation
+            _searchCancellationTokenSource = new CancellationTokenSource();
+            var cancellationToken = _searchCancellationTokenSource.Token;
+            
+            // Clear paused state
+            IsSearchPaused = false;
+            IsSearching = true;
+
+            // Continue search on background thread
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await PerformSearchAsync(searchPath, currentSearchText, cancellationToken, 
+                        _pausedSearchQueue, _pausedProcessedDirs);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Search was cancelled, ignore
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Search continuation error: {ex.Message}");
+                }
+            }, cancellationToken);
         }
 
         private void CancelAndDisposeSearch()
@@ -540,8 +634,25 @@ namespace WindowsExplorer.ViewModels
                 _searchCancellationTokenSource = null;
             }
             
-            // Clear active search path
+            // Clear active search path and paused state
             _activeSearchPath = null;
+            _pausedSearchQueue = null;
+            _pausedProcessedDirs = null;
+        }
+
+        private void ClearSearchUIState()
+        {
+            // Clear search UI state on UI thread
+            if (App.MainWindow != null)
+            {
+                App.MainWindow.DispatcherQueue.TryEnqueue(() =>
+                {
+                    IsSearching = false;
+                    IsSearchPaused = false;
+                    FoldersChecked = 0;
+                    FilesChecked = 0;
+                });
+            }
         }
 
         private async Task ApplySearchFilterAsync()
@@ -622,13 +733,18 @@ namespace WindowsExplorer.ViewModels
                 {
                     dispatcherQueue.TryEnqueue(() =>
                     {
-                        IsSearching = false;
+                        // If not paused, set IsSearching to false
+                        if (!IsSearchPaused)
+                        {
+                            IsSearching = false;
+                        }
                     });
                 }
             }
         }
 
-        private async Task PerformSearchAsync(string searchPath, string searchTerm, CancellationToken cancellationToken)
+        private async Task PerformSearchAsync(string searchPath, string searchTerm, CancellationToken cancellationToken, 
+            Queue<string>? continuationQueue = null, HashSet<string>? continuationProcessedDirs = null)
         {
             var dispatcherQueue = App.MainWindow?.DispatcherQueue;
             if (dispatcherQueue == null)
@@ -678,12 +794,26 @@ namespace WindowsExplorer.ViewModels
                             });
                         }
                     },
-                    cancellationToken);
+                    cancellationToken,
+                    MaxSearchResults,
+                    continuationQueue,
+                    continuationProcessedDirs);
             }, cancellationToken);
 
-            // Items are already added to UI via callback as they're found
-            // No need to re-sort - items appear in breadth-first order
-            // User can sort by clicking column headers if desired
+            // Check if search was paused
+            if (searchResult.IsPaused && _activeSearchPath == searchPath && !cancellationToken.IsCancellationRequested)
+            {
+                dispatcherQueue.TryEnqueue(() =>
+                {
+                    if (_activeSearchPath == searchPath)
+                    {
+                        IsSearchPaused = true;
+                        IsSearching = true; // Keep searching state visible
+                        _pausedSearchQueue = searchResult.RemainingQueue;
+                        _pausedProcessedDirs = searchResult.ProcessedDirectories;
+                    }
+                });
+            }
         }
 
         private async Task FilterCurrentItemsAsync(string searchText)

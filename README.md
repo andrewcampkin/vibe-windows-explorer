@@ -33,38 +33,20 @@ A modern Windows file explorer application built with C# and WinUI 3.
 
 ## Building and Running
 
-### Development Build
-
 1. Open `WindowsExplorer.sln` in Visual Studio 2022
-2. Restore NuGet packages (Visual Studio will do this automatically, or use Tools > NuGet Package Manager > Restore NuGet Packages)
-3. Build the solution (F6 or Build > Build Solution)
-4. Run the application (F5 or Debug > Start Debugging)
+2. Press **F5** to build and run (or Build > Build Solution, then Debug > Start Debugging)
 
-### Packaging as Standalone Executable
+### Publishing
 
-The application can be published as a self-contained executable that includes the .NET runtime and all dependencies, allowing it to run on any Windows 10+ machine without requiring .NET to be installed.
+Publish as a self-contained executable that runs on any Windows 10+ machine without requiring .NET:
 
-Pre-configured publish profiles are available for different platforms:
+1. Right-click the `WindowsExplorer` project → **Publish**
+2. Select a publish profile: **win-x64**, **win-x86**, or **win-arm64**
+3. Click **Publish**
 
-1. Right-click on the `WindowsExplorer` project in Solution Explorer
-2. Select **Publish**
-3. Select one of the existing publish profiles:
-   - **win-x64** (for 64-bit Windows)
-   - **win-x86** (for 32-bit Windows)
-   - **win-arm64** (for ARM64 Windows)
-4. Click **Publish**
+Output location: `\bin\win-x64\publish` or similar
 
-The published files will be output to:
-```
-WindowsExplorer\bin\{Configuration}\net8.0-windows10.0.19041.0\{runtime-identifier}\publish\
-```
-
-For example, for a Release build targeting x64:
-```
-WindowsExplorer\bin\Release\net8.0-windows10.0.19041.0\win-x64\publish\
-```
-
-**Note**: The publish directory contains all necessary files including the executable, dependencies, and runtime. You can copy the entire `publish` folder to another Windows machine and run `WindowsExplorer.exe` without installing .NET.
+Copy the entire `publish` folder to run `WindowsExplorer.exe` on any Windows machine or just run from that folder.
 
 ## Project Structure
 

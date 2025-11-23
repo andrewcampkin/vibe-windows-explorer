@@ -1,0 +1,275 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="WindowsExplorer.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:WindowsExplorer"
+    xmlns:viewmodels="using:WindowsExplorer.ViewModels"
+    xmlns:converters="using:WindowsExplorer.Converters"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="Windows Explorer">
+
+    <Window.SystemBackdrop>
+        <MicaBackdrop />
+    </Window.SystemBackdrop>
+
+    <Grid>
+        <Grid.Resources>
+            <converters:FileSizeConverter x:Key="FileSizeConverter"/>
+            <converters:DateConverter x:Key="DateConverter"/>
+            <converters:SymbolConverter x:Key="SymbolConverter"/>
+            <converters:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+        </Grid.Resources>
+        <Grid.RowDefinitions>
+            <RowDefinition x:Name="TitleBarRow" Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Title Bar with Tabs -->
+        <Grid Grid.Row="0" x:Name="TitleBarGrid" Background="Transparent" Height="32">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            
+            <!-- App Icon -->
+            <Image Grid.Column="0" 
+                   Source="Assets/Square44x44Logo.png" 
+                   Width="16" 
+                   Height="16" 
+                   Margin="12,0,8,0"
+                   VerticalAlignment="Center"/>
+            
+            <!-- Tabs in Title Bar -->
+            <TabView Grid.Column="1"
+                    x:Name="TabViewControl"
+                    TabCloseRequested="TabView_TabCloseRequested"
+                    AddTabButtonClick="TabView_AddTabButtonClick"
+                    SelectionChanged="TabView_SelectionChanged"
+                    Margin="0,0,0,0"
+                    VerticalAlignment="Stretch"
+                    VerticalContentAlignment="Stretch"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    IsAddTabButtonVisible="True">
+            </TabView>
+            
+            <!-- Window Controls (handled by system, but we need space) -->
+            <Grid Grid.Column="2" x:Name="WindowControlsGrid" Width="138" Background="Transparent"/>
+        </Grid>
+
+        <!-- Navigation Toolbar -->
+        <Grid Grid.Row="1" Margin="10,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            
+            <!-- Navigation Buttons (Left) -->
+            <StackPanel Grid.Column="0" Orientation="Horizontal">
+                <Button x:Name="BackButton" 
+                       Content="← Back"
+                       Click="BackButton_Click"
+                       Padding="12,6"
+                       Margin="0,0,8,0"/>
+                <Button x:Name="ForwardButton" 
+                       Content="Forward →"
+                       Click="ForwardButton_Click"
+                       Padding="12,6"
+                       Margin="0,0,8,0"/>
+                <Button x:Name="UpButton" 
+                       Content="↑ Up"
+                       Click="UpButton_Click"
+                       Padding="12,6"/>
+            </StackPanel>
+            
+            <!-- Search Bar (Right) -->
+            <Grid Grid.Column="2" VerticalAlignment="Center">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0" VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="250"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" 
+                              Text="Search:" 
+                              VerticalAlignment="Center" 
+                              Margin="0,0,8,0"/>
+                    <TextBox x:Name="SearchTextBox"
+                            Grid.Column="1"
+                            PlaceholderText="Filter by name..."
+                            TextChanged="SearchTextBox_TextChanged"/>
+                </Grid>
+                <TextBlock Grid.Row="1"
+                          Text="{Binding SelectedTab.ExplorerViewModel.SearchStatusText}"
+                          FontSize="11"
+                          Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}"
+                          Margin="0,4,0,0"
+                          Visibility="{Binding SelectedTab.ExplorerViewModel.IsSearching, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+            </Grid>
+        </Grid>
+
+        <!-- Address Bar -->
+        <Grid Grid.Row="2" Margin="10" VerticalAlignment="Center">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" 
+                      Text="Address:" 
+                      VerticalAlignment="Center" 
+                      Margin="0,0,10,0"/>
+            <TextBox x:Name="AddressTextBox"
+                    Grid.Column="1"
+                    KeyDown="AddressTextBox_KeyDown"
+                    LostFocus="AddressTextBox_LostFocus"/>
+        </Grid>
+
+        <!-- File List View -->
+        <Grid Grid.Row="3">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            
+            <!-- Column Headers -->
+            <Grid Grid.Row="0" Background="{ThemeResource SystemControlBackgroundBaseLowBrush}" BorderThickness="0,0,0,1" BorderBrush="{ThemeResource SystemControlForegroundBaseMediumLowBrush}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="300"/>
+                    <ColumnDefinition Width="120"/>
+                    <ColumnDefinition Width="150"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Button Grid.Column="0" 
+                       Content="{Binding SelectedTab.ExplorerViewModel.SortColumnName}" 
+                       FontWeight="SemiBold" 
+                       Margin="12,8" 
+                       VerticalAlignment="Center"
+                       HorizontalAlignment="Left"
+                       HorizontalContentAlignment="Left"
+                       Background="Transparent"
+                       BorderThickness="0"
+                       Padding="0"
+                       Click="NameHeader_Click"/>
+                <Button Grid.Column="1" 
+                       Content="{Binding SelectedTab.ExplorerViewModel.SortColumnSize}" 
+                       FontWeight="SemiBold" 
+                       Margin="12,8,12,8" 
+                       VerticalAlignment="Center" 
+                       HorizontalAlignment="Right"
+                       HorizontalContentAlignment="Right"
+                       Background="Transparent"
+                       BorderThickness="0"
+                       Padding="0"
+                       Click="SizeHeader_Click"/>
+                <Button Grid.Column="2" 
+                       Content="{Binding SelectedTab.ExplorerViewModel.SortColumnType}" 
+                       FontWeight="SemiBold" 
+                       Margin="0,8,12,8" 
+                       VerticalAlignment="Center"
+                       HorizontalAlignment="Left"
+                       HorizontalContentAlignment="Left"
+                       Background="Transparent"
+                       BorderThickness="0"
+                       Padding="0"
+                       Click="TypeHeader_Click"/>
+                <Button Grid.Column="3" 
+                       Content="{Binding SelectedTab.ExplorerViewModel.SortColumnDateModified}" 
+                       FontWeight="SemiBold" 
+                       Margin="0,8,12,8" 
+                       VerticalAlignment="Center"
+                       HorizontalAlignment="Left"
+                       HorizontalContentAlignment="Left"
+                       Background="Transparent"
+                       BorderThickness="0"
+                       Padding="0"
+                       Click="DateModifiedHeader_Click"/>
+            </Grid>
+            
+            <!-- File List -->
+            <ListView Grid.Row="1"
+                     x:Name="FileListView"
+                     ItemsSource="{Binding SelectedTab.ExplorerViewModel.Items}"
+                     DoubleTapped="FileListView_DoubleTapped"
+                     SelectionChanged="FileListView_SelectionChanged"
+                     RightTapped="FileListView_RightTapped">
+                <ListView.ContextFlyout>
+                    <MenuFlyout x:Name="FileListContextMenu" Opening="FileListContextMenu_Opening">
+                        <MenuFlyoutItem x:Name="ContextMenu_Open" 
+                                      Text="Open" 
+                                      Icon="OpenFile" 
+                                      Click="ContextMenu_Open_Click"/>
+                        <MenuFlyoutItem x:Name="ContextMenu_OpenFileLocation" 
+                                      Text="Open File Location" 
+                                      Icon="Folder"
+                                      Click="ContextMenu_OpenFileLocation_Click"/>
+                        <MenuFlyoutItem x:Name="ContextMenu_OpenFileLocationNewTab" 
+                                      Text="Open File Location in New Tab" 
+                                      Icon="NewFolder"
+                                      Click="ContextMenu_OpenFileLocationNewTab_Click"/>
+                        <MenuFlyoutSeparator/>
+                        <MenuFlyoutItem x:Name="ContextMenu_Copy" 
+                                      Text="Copy" 
+                                      Icon="Copy" 
+                                      Click="ContextMenu_Copy_Click"/>
+                        <MenuFlyoutItem x:Name="ContextMenu_Cut" 
+                                      Text="Cut" 
+                                      Icon="Cut" 
+                                      Click="ContextMenu_Cut_Click"/>
+                        <MenuFlyoutSeparator/>
+                        <MenuFlyoutItem x:Name="ContextMenu_Paste" 
+                                      Text="Paste" 
+                                      Icon="Paste" 
+                                      Click="ContextMenu_Paste_Click"/>
+                    </MenuFlyout>
+                </ListView.ContextFlyout>
+                <ListView.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Height="32">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="300"/>
+                                <ColumnDefinition Width="120"/>
+                                <ColumnDefinition Width="150"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,12,0">
+                                <SymbolIcon Symbol="{Binding IsDirectory, Converter={StaticResource SymbolConverter}}" 
+                                           Margin="0,0,8,0"/>
+                                <TextBlock Text="{Binding DisplayName}" 
+                                          VerticalAlignment="Center">
+                                    <ToolTipService.ToolTip>
+                                        <ToolTip>
+                                            <TextBlock Text="{Binding Path}"/>
+                                        </ToolTip>
+                                    </ToolTipService.ToolTip>
+                                </TextBlock>
+                            </StackPanel>
+                            <TextBlock Grid.Column="1" 
+                                      Text="{Binding Size, Converter={StaticResource FileSizeConverter}}"
+                                      HorizontalAlignment="Right"
+                                      VerticalAlignment="Center"
+                                      Margin="12,0,12,0"/>
+                            <TextBlock Grid.Column="2" 
+                                      Text="{Binding Type}"
+                                      VerticalAlignment="Center"
+                                      Margin="0,0,12,0"/>
+                            <TextBlock Grid.Column="3" 
+                                      Text="{Binding LastModified, Converter={StaticResource DateConverter}}"
+                                      VerticalAlignment="Center"
+                                      Margin="0,0,12,0"/>
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+        </Grid>
+    </Grid>
+</Window>
